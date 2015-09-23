@@ -6,7 +6,7 @@
 
 Apache Spark Machine Learning application applied to Hybris business events.
 
-## Uses:
+## Built with:
 
 * Apache thrift,
 * Twitter Finagle
