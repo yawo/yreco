@@ -1,4 +1,7 @@
 # yreco
+![Hybris](http://www.computerworld.in/sites/default/files/news/2013/08/SAP-Outlines-Plans-for-Hybris,-Push-into-'Omni-commerce'_394x296.jpg)
+
+
 Apache Spark Machine Learning application applied to Hybris business events.
 
 ## Uses:
