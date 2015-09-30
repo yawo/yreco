@@ -9,6 +9,7 @@ import org.apache.hadoop.hbase.client.Result
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import org.apache.hadoop.hbase.mapreduce.TableInputFormat
 import org.apache.hadoop.hbase.util.Bytes
+import org.apache.spark.mllib.linalg.distributed.{CoordinateMatrix, MatrixEntry}
 import org.apache.spark.mllib.recommendation.{ALS, MatrixFactorizationModel, Rating}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.{SparkConf, SparkContext}
@@ -57,8 +58,19 @@ object RecommenderDemo extends App {
   val usersByProductCount = IndexedRDD(
           ratings.map {
             case Rating(user, product, rate) =>   (user, 1)
-          }.combineByKey[Int]( (u)=>1 , (c,u) => c+1 , (c1,c2) => c1+c2 )
+          }.combineByKey[Int]( (u:Int)=>1 , (c:Int,u:Int) => c+1 , (c1:Int,c2:Int) => c1+c2 )
   ).cache()
+
+  //Similarities
+  val nSims = 3
+  val pfi = model.productFeatures.zipWithIndex
+  val entries = pfi.flatMap { t => for (i <- t._1._2.indices) yield MatrixEntry(i, t._2, t._1._2(i)) }
+  val dic = pfi.map { t => (t._2, t._1._1) }.collectAsMap()
+  val sims = new CoordinateMatrix(entries).toRowMatrix().columnSimilarities(0.01).entries.map {
+    case MatrixEntry(i, j, u) => ((i, j), u)
+  }.sortBy((_._2), false).take(nSims).map{
+    t => (dic(t._1._1),dic(t._1._2))
+  }
 
   def recommendationProxy(userId: Int, numberOfRecommendation: Int, currentItemIds: collection.Set[Int]):Future[collection.Set[Int]] = {
     Future {
