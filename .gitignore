@@ -1,2 +1,7 @@
 /target
 /.idea/libraries
+project/project/
+project/target
+derby.log
+.history
+.idea

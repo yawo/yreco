@@ -13,7 +13,7 @@ resolvers += "Repo at github.com/ankurdave/maven-repo" at "https://github.com/an
 
 libraryDependencies ++= Seq(
   "com.twitter" %% "finagle-thriftmux" % "6.28.0",
-  "com.twitter" %% "scrooge-core" % "3.18.1",
+  "com.twitter" %% "scrooge-core" % "4.1.0" % "provided",
   "org.apache.hbase" % "hbase-common" % "1.0.1.1",
   "org.apache.hbase" % "hbase-server" % "1.0.1.1",
   "org.apache.hbase" % "hbase-client" % "1.0.1.1",

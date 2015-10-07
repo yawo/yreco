@@ -15,7 +15,10 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.{SparkConf, SparkContext}
 import thrift.RecommenderEngine.FutureIface
 import scala.util.Try
-
+import java.io.File
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs._
+import org.apache.spark.SparkContext._
 /**
  * Created by yawo on 20/09/15.
  * > $SPARK_HOME/bin/spark-shell --packages amplab:spark-indexedrdd:0.3
@@ -41,9 +44,12 @@ object RecommenderDemo extends App {
   hbaseConf.set(    "zookeeper.znode.parent"    , "/hbase")
   hbaseConf.set(    TableInputFormat.INPUT_TABLE, viewTable)
 
-  def fetchAndBuild(): Unit ={
-
+  def merge(srcPath: String, dstPath: String): Unit =  {
+    val hadoopConfig = new Configuration()
+    val hdfs = FileSystem.get(hadoopConfig)
+    FileUtil.copyMerge(hdfs, new Path(srcPath), hdfs, new Path(dstPath), false, hadoopConfig, null)
   }
+
   //FETCH DATA FROM HBASE
   val viewRDD: RDD[(ImmutableBytesWritable, Result)] = sc.newAPIHadoopRDD(hbaseConf, classOf[TableInputFormat], classOf[ImmutableBytesWritable], classOf[Result])
   val ratings: RDD[Rating] = viewRDD.map {
@@ -62,34 +68,42 @@ object RecommenderDemo extends App {
   ).cache()
 
   //Similarities
+  val file = "/tmp/partitionned_sims.csv"
+  FileUtil.fullyDelete(new File(file))
+  val destinationFile= "/tmp/sims.csv"
+  FileUtil.fullyDelete(new File(destinationFile))
+
   val nSims = 3
   val pfi = model.productFeatures.zipWithIndex
   val entries = pfi.flatMap { t => for (i <- t._1._2.indices) yield MatrixEntry(i, t._2, t._1._2(i)) }
   val dic = pfi.map { t => (t._2, t._1._1) }.collectAsMap()
   val sims = new CoordinateMatrix(entries).toRowMatrix().columnSimilarities(0.01).entries.map {
     case MatrixEntry(i, j, u) => ((i, j), u)
-  }.sortBy((_._2), false).take(nSims).map{
+  }.sortBy((_._2), false).map{
     t => (dic(t._1._1),dic(t._1._2))
   }
 
-  def recommendationProxy(userId: Int, numberOfRecommendation: Int, currentItemIds: collection.Set[Int]):Future[collection.Set[Int]] = {
-    Future {
-      println("Got userId %s".format(userId))
-      val currentItemIdSet     = if(currentItemIds == null) Set.empty else currentItemIds
-      val previousItemsIdCount = usersByProductCount.get(userId).getOrElse(0)
-      val nToRecommend         = numberOfRecommendation + currentItemIdSet.size + previousItemsIdCount
-      val recommended          = model.recommendProducts(userId,nToRecommend).map(_.product).drop(previousItemsIdCount).toSet
-      recommended -- currentItemIdSet
-    }
-  }
-
   //SEND OUT TO SOLR
+  sims.saveAsTextFile(file)
+  merge(file, destinationFile)
+
   //TODO
 
   //SERVE WITH FINAGLE THRIFTMUX SERVER.
+  def recommendationProxy(userId: Int, numberOfRecommendation: Int, currentItemIds: Seq[Int]):Future[Seq[Int]] = {
+    Future {
+      println("Got userId %s".format(userId))
+      val currentItemIdSeq     = if(currentItemIds == null) Seq.empty else currentItemIds
+      val previousItemsIdCount = usersByProductCount.get(userId).getOrElse(0)
+      val nToRecommend         = numberOfRecommendation + currentItemIdSeq.size + previousItemsIdCount
+      val recommended          = model.recommendProducts(userId,nToRecommend).map(_.product).drop(previousItemsIdCount)
+      recommended.diff(currentItemIdSeq).take(numberOfRecommendation)
+    }
+  }
+
   println("starting server...")
   val server: ListeningServer = ThriftMux.serveIface(":*",new FutureIface {
-    override def getRecommendations(userId: Int, numberOfRecommendation: Int, currentItemIds: collection.Set[Int]): Future[collection.Set[Int]] = {
+    override def getRecommendations(userId: Int, numberOfRecommendation: Int, currentItemIds: Seq[Int]): Future[Seq[Int]] = {
       recommendationProxy(userId,numberOfRecommendation,currentItemIds)
     }
   })
