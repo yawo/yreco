@@ -2,8 +2,6 @@ package com.yreco
 
 import java.io.{File, PrintWriter}
 
-import com.twitter.finagle.{ListeningServer, ThriftMux}
-import com.twitter.util.{Await, Future}
 import com.yreco.YrecoIntSerializer._
 import edu.berkeley.cs.amplab.spark.indexedrdd.IndexedRDD
 import org.apache.hadoop.conf.Configuration
@@ -17,7 +15,6 @@ import org.apache.spark.mllib.linalg.distributed.{CoordinateMatrix, MatrixEntry}
 import org.apache.spark.mllib.recommendation.{ALS, MatrixFactorizationModel, Rating}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.{SparkConf, SparkContext}
-import thrift.RecommenderEngine.FutureIface
 
 import scala.util.Try
 /**
@@ -27,14 +24,12 @@ import scala.util.Try
  *  $SPARK_HOME/bin/spark-submit --class "com.yreco.RecommenderDemo" --master local[4] /home/yawo/Studio/ytech/others/finagle/target/scala-2.11/yreco-assembly-1.0.jar
  */
 object RecommenderDemo{
-  def main(args: Array[String]) {
+
     //CONFIG
     @transient val hbaseConf = HBaseConfiguration.create()
     @transient val conf = new SparkConf().setAppName("Erecommender")
-    @transient val scProxy = SparkContext.getOrCreate(conf) //new SparkContext(conf);
+    @transient lazy val scProxy = SparkContext.getOrCreate(conf) //new SparkContext(conf);
     val viewTable = "view"
-    val nUsersToRecommend = 2
-    val nProductsToRecommend = 2
     val ProductColumnFamily = Bytes.toBytes("p")
     val ProductIdColumnQualifier = Bytes.toBytes("id")
     val UserColumnFamily = Bytes.toBytes("u")
@@ -58,10 +53,10 @@ object RecommenderDemo{
     }
 
     //FETCH DATA FROM HBASE
-    val viewRDD: RDD[(ImmutableBytesWritable, Result)] = scProxy.newAPIHadoopRDD(hbaseConf, classOf[TableInputFormat], classOf[ImmutableBytesWritable], classOf[Result])
 
     var ratings: RDD[Rating] = null;
     def loadRatings = {
+      val viewRDD: RDD[(ImmutableBytesWritable, Result)] = scProxy.newAPIHadoopRDD(hbaseConf, classOf[TableInputFormat], classOf[ImmutableBytesWritable], classOf[Result])
       ratings = viewRDD.map {
         case (key, res) => Try(Bytes.toString(res.getValue(ProductColumnFamily, ProductIdColumnQualifier)).toInt).toOption.map {
           new Rating(Bytes.toString(res.getValue(UserColumnFamily, UserIdColumnQualifier)).toInt, _, 1D)
@@ -107,44 +102,4 @@ object RecommenderDemo{
       }
       writer.close
     }
-
-    //TODO
-
-    //SERVE WITH FINAGLE THRIFTMUX SERVER.
-    def recommendationProxy(userId: Int, numberOfRecommendation: Int, currentItemIds: Seq[Int]): Future[Seq[Int]] = {
-      Future {
-        println("Got userId %s".format(userId))
-        val currentItemIdSeq = if (currentItemIds == null) Seq.empty else currentItemIds
-        val previousItemsIdCount = usersByProductCount.get(userId).getOrElse(0)
-        val nToRecommend = numberOfRecommendation + currentItemIdSeq.size + previousItemsIdCount
-        val recommended = model.recommendProducts(userId, nToRecommend).map(_.product).drop(previousItemsIdCount)
-        recommended.diff(currentItemIdSeq).take(numberOfRecommendation)
-      }
-    }
-
-    println(
-      """
-        |starting finagle thriftmux server...
-        |You may connect with the following scala code:
-        |   import com.twitter.finagle.ThriftMux
-        |   import thrift.RecommenderEngine.FutureIface
-        |   val client = ThriftMux.newIface[FutureIface](":12000")
-      """.stripMargin)
-    @transient val server: ListeningServer = ThriftMux.serveIface(":12000", new FutureIface {
-      override def getRecommendations(userId: Int, numberOfRecommendation: Int, currentItemIds: Seq[Int]): Future[Seq[Int]] = {
-        recommendationProxy(userId, numberOfRecommendation, currentItemIds)
-      }
-
-      override def reLoadDataAndBuildModel(): Future[Boolean] = {
-        Future {
-          loadRatings
-          trainModel
-          computeSimilarity
-          computeRecos()
-          true
-        }
-      }
-    })
-    Await.ready(server)//, Duration.fromSeconds(600)
-  }
 }
