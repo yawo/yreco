@@ -14,10 +14,10 @@ class YrecoIntSerializer extends KeySerializer[Int] {
     ( k        & 0xFF).toByte)
 
   override def fromBytes(b: Array[Byte]): Int =
-      (b(4).toInt << 24) & (0xFF << 24) |
-      (b(5).toInt << 16) & (0xFF << 16) |
-      (b(6).toInt <<  8) & (0xFF <<  8) |
-      b(7).toInt         &  0xFF
+      (b(0).toInt << 24) & (0xFF << 24) |
+      (b(1).toInt << 16) & (0xFF << 16) |
+      (b(2).toInt <<  8) & (0xFF <<  8) |
+      b(3).toInt         &  0xFF
 }
 
 object YrecoIntSerializer{

@@ -1,4 +1,4 @@
-name := "finagle"
+name := "yreco"
 
 version := "1.0"
 
@@ -17,7 +17,7 @@ libraryDependencies ++= Seq(
   "org.apache.hbase" % "hbase-common" % "1.0.1.1",
   "org.apache.hbase" % "hbase-server" % "1.0.1.1",
   "org.apache.hbase" % "hbase-client" % "1.0.1.1",
-  "org.apache.spark" % "spark-mllib_2.10" % "1.4.0" % "provided",
-  "amplab" % "spark-indexedrdd" % "0.2"
+  "org.apache.spark" % "spark-mllib_2.11" % "1.5.1" % "provided",
+  "amplab" % "spark-indexedrdd" % "0.3"
 )
 
