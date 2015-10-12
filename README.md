@@ -9,7 +9,9 @@
 
 ![Amazon](http://1.bp.blogspot.com/-SJhlctsnGFA/UFYEW8c5VvI/AAAAAAAAACk/-ZBbpmv886s/s1600/20100517_amazon.gif)
 
+![Bash](http://img.bfmtv.com/c/630/420/617/df99c0369426d0dd1b2d20f5c4ff4.jpg)
 
+![SpringIntegration](http://jpalace.org/store/docs/tutorials/spring/integration/img/eip-adapter.png)
 
 Apache Spark Machine Learning application applied to Hybris business events.
 
@@ -19,7 +21,9 @@ Apache Spark Machine Learning application applied to Hybris business events.
 * Twitter Finagle
 * Apache Hbase
 * Apache Spark MLLib (ALS algorithm)
-* Hybris business events
+* Hybris (business events,Hotfolders, Product References, ...)
+* Spring integration
+* Unix Bash 
 
 To provides a real time recommender engine queryable from Hybris.
 
