@@ -32,7 +32,7 @@ object RecommenderDemoWithServer {
         Future {
           loadRatings
           trainModel
-          computeSimilarity
+          computeSimilarity()
           computeRecos()
           true
         }

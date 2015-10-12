@@ -4,8 +4,6 @@ import java.io.{File, PrintWriter}
 
 import com.yreco.YrecoIntSerializer._
 import edu.berkeley.cs.amplab.spark.indexedrdd.IndexedRDD
-import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs._
 import org.apache.hadoop.hbase.HBaseConfiguration
 import org.apache.hadoop.hbase.client.Result
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
@@ -36,7 +34,6 @@ object RecommenderDemo{
     val UserIdColumnQualifier = Bytes.toBytes("id")
     val rank = 10
     val numIterations = 20
-    val similarityPartitionFile = "/tmp/partitionned_sims.csv"
     val similarityFile = "/tmp/sims.csv"
     val recoByUserFile = "/tmp/reco.csv"
 
@@ -45,12 +42,6 @@ object RecommenderDemo{
     hbaseConf.set("hbase.zookeeper.quorum", "localhost")
     hbaseConf.set("zookeeper.znode.parent", "/hbase")
     hbaseConf.set(TableInputFormat.INPUT_TABLE, viewTable)
-
-    def merge(srcPath: String, dstPath: String): Unit = {
-      val hadoopConfig = new Configuration()
-      val hdfs = FileSystem.get(hadoopConfig)
-      FileUtil.copyMerge(hdfs, new Path(srcPath), hdfs, new Path(dstPath), false, hadoopConfig, null)
-    }
 
     //FETCH DATA FROM HBASE
 
@@ -75,21 +66,22 @@ object RecommenderDemo{
     }
 
 
-    def computeSimilarity = {
+    def computeSimilarity(nMaxSims:Int = 50) = {
       //Similarities
-      FileUtil.fullyDelete(new File(similarityPartitionFile))
-      FileUtil.fullyDelete(new File(similarityFile))
       val pfi = model.productFeatures.zipWithIndex
       val entries = pfi.flatMap { t => for (i <- t._1._2.indices) yield MatrixEntry(i, t._2, t._1._2(i)) }
       val dic = pfi.map { t => (t._2, t._1._1) }.collectAsMap()
-      val sims = new CoordinateMatrix(entries).toRowMatrix().columnSimilarities(0.01).entries.map {
+      val topSims = new CoordinateMatrix(entries).toRowMatrix().columnSimilarities(0.01).entries.map {
         case MatrixEntry(i, j, u) => ((i, j), u)
-      }.sortBy((_._2), false).map {
-        t => (dic(t._1._1), dic(t._1._2))
+      }.sortBy((_._2), false).take(nMaxSims)
+      val writer = new PrintWriter(new File(similarityFile))
+      for( ((productIndex1,productIndex2),simLevel) <- topSims){
+        writer.write(dic(productIndex1))
+        writer.write(",")
+        writer.write(dic(productIndex2))
+        writer.write("\n")
       }
-      //SEND OUT TO FILE
-      sims.saveAsTextFile(similarityPartitionFile)
-      merge(similarityPartitionFile, similarityFile)
+      writer.close
     }
 
     def computeRecos(numberOfRecommendation: Int = 3) = {

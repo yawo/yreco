@@ -13,7 +13,7 @@ object RecommenderDemoBatch {
     println("Batch Job. Creating sims.csv and recos.csv...");
     loadRatings
     trainModel
-    computeSimilarity
+    computeSimilarity()
     computeRecos()
   }
 }
