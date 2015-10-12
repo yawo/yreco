@@ -76,9 +76,9 @@ object RecommenderDemo{
       }.sortBy((_._2), false).take(nMaxSims)
       val writer = new PrintWriter(new File(similarityFile))
       for( ((productIndex1,productIndex2),simLevel) <- topSims){
-        writer.write(dic(productIndex1))
+        writer.write(dic(productIndex1).toString)
         writer.write(",")
-        writer.write(dic(productIndex2))
+        writer.write(dic(productIndex2).toString)
         writer.write("\n")
       }
       writer.close

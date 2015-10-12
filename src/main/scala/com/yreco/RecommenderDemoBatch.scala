@@ -10,7 +10,13 @@ import RecommenderDemo._
 object RecommenderDemoBatch {
 
   def main(args: Array[String]) {
-    println("Batch Job. Creating sims.csv and recos.csv...");
+    println(
+      """
+        |*****************************************************************
+        |YReco Batch Job. Creating sims.csv and recos.csv...
+        |*****************************************************************
+        |
+      """.stripMargin);
     loadRatings
     trainModel
     computeSimilarity()
