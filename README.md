@@ -1,43 +1,11 @@
-# yreco
-![Hybris](http://static1.squarespace.com/static/52b0f50ae4b0bb29db95a077/t/547f6d4ee4b046b3148da91c/1417637198924/hybris-icon.png)
+#YRecommender
 
-![Spark](http://spark.apache.org/docs/latest/img/spark-logo-hd.png)
+Dans la version 5.5, Hybris rajoute la fonctionnalité des Business Events qui facilitent le tracking des actions des utilisateurs d'un site. 
 
-![Finagle](https://pbs.twimg.com/profile_images/378800000650818162/903f3158869844f68b0fd36dde6b2d29_400x400.png)
+Cette nouvelle fonctionnalité (similaire à google analytics) permet d'exploiter une immense source de données à des fins d'analyse, de marketing. 
+Il devient ainsi possible de segmenter ou de personnaliser de façon automatique et en temps réel les éléments proposés à un internaute.
 
-![Thrift](http://no-cache.appdynamics-static.com/appsphere/logos/thrift_350.png)
+Dans cette présentation nous montrerons comment avec des outils simples de Machine Learning, et des données fournies par Hybris Business Events, on peut construire un mini Recommender Engine.
 
-![Amazon](http://1.bp.blogspot.com/-SJhlctsnGFA/UFYEW8c5VvI/AAAAAAAAACk/-ZBbpmv886s/s1600/20100517_amazon.gif)
-
-![Bash](http://img.bfmtv.com/c/630/420/617/df99c0369426d0dd1b2d20f5c4ff4.jpg)
-
-![SpringIntegration](http://jpalace.org/store/docs/tutorials/spring/integration/img/eip-adapter.png)
-
-Apache Spark Machine Learning application applied to Hybris business events.
-
-## Built with:
-
-* Apache thrift,
-* Twitter Finagle
-* Apache Hbase
-* Apache Spark MLLib (ALS algorithm)
-* Hybris (business events,Hotfolders, Product References, ...)
-* Spring integration
-* Unix Bash 
-
-To provides a real time recommender engine queryable from Hybris.
-
-## Basic Flow:
-
-Hybris Business Events => 
-     (Unix sed mini ETL)  => 
-       Hbase storage          =>
-          Spark MLLib ALS algorithm =>
-             ThriftMux Server (Twitter Finagle) =>
-               Hybris Client (Twitter Finagle)
-               
-
-## Road map:               
-  Add Solr to the stack.
-         
+Deux implémentations, une en mode Batch (csv, hotfolder,crons) et une en  Real Time (finagle) seront discutées.
        
