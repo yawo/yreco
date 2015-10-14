@@ -9,7 +9,8 @@ import org.apache.hadoop.hbase.client.Result
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import org.apache.hadoop.hbase.mapreduce.TableInputFormat
 import org.apache.hadoop.hbase.util.Bytes
-import org.apache.spark.mllib.linalg.distributed.{CoordinateMatrix, MatrixEntry}
+import org.apache.spark.mllib.linalg.Vectors
+import org.apache.spark.mllib.linalg.distributed.{RowMatrix, CoordinateMatrix, MatrixEntry}
 import org.apache.spark.mllib.recommendation.{ALS, MatrixFactorizationModel, Rating}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.{SparkConf, SparkContext}
@@ -24,18 +25,19 @@ import scala.util.Try
 object RecommenderDemo{
 
     //CONFIG
-    @transient val hbaseConf = HBaseConfiguration.create()
-    @transient val conf = new SparkConf().setAppName("Erecommender")
-    @transient lazy val scProxy = SparkContext.getOrCreate(conf) //new SparkContext(conf);
-    val viewTable = "view"
-    val ProductColumnFamily = Bytes.toBytes("p")
+    @transient val hbaseConf     = HBaseConfiguration.create()
+    @transient val conf          = new SparkConf().setAppName("Erecommender")
+    @transient lazy val scProxy  = SparkContext.getOrCreate(conf) //new SparkContext(conf);
+    val viewTable                = "view"
+    val ProductColumnFamily      = Bytes.toBytes("p")
     val ProductIdColumnQualifier = Bytes.toBytes("id")
-    val UserColumnFamily = Bytes.toBytes("u")
-    val UserIdColumnQualifier = Bytes.toBytes("id")
-    val rank = 10
-    val numIterations = 20
-    val similarityFile = "/tmp/sims.csv"
-    val recoByUserFile = "/tmp/reco.csv"
+    val UserColumnFamily         = Bytes.toBytes("u")
+    val UserIdColumnQualifier    = Bytes.toBytes("id")
+    val rank                     = 100
+    val numIterations            = 20
+    val similarityFile           = new File("/tmp/sims.csv")
+    val ratingsSimilarityFile    = new File("/tmp/sims_ratings.csv")
+    val recoByUserFile           = new File("/tmp/reco.csv")
 
     hbaseConf.set("hbase.master", "localhost:60000")
     hbaseConf.setInt("timeout", 120000)
@@ -52,40 +54,60 @@ object RecommenderDemo{
         case (key, res) => Try(Bytes.toString(res.getValue(ProductColumnFamily, ProductIdColumnQualifier)).toInt).toOption.map {
           new Rating(Bytes.toString(res.getValue(UserColumnFamily, UserIdColumnQualifier)).toInt, _, 1D)
         }.orNull
-      }.filter(_ != null)
+      }.filter(_ != null).distinct()
     }
 
     //BUILD THE RECO MODEL USING ALS ALGORITHM
     var model: MatrixFactorizationModel = null
     var usersByProductCount: IndexedRDD[Int, Int] = null
     def trainModel = {
-      model = ALS.trainImplicit(ratings, rank, numIterations)
-      usersByProductCount = IndexedRDD(ratings.map {
-        case Rating(user, product, rate) => (user, 1)
-      }.combineByKey[Int]((u: Int) => 1, (c: Int, u: Int) => c + 1, (c1: Int, c2: Int) => c1 + c2)).cache()
+      model               = ALS.trainImplicit(ratings, rank, numIterations)
+      val usersByProduct  = ratings.map {case Rating(user, product, rate) => (user, product) }
+      usersByProductCount = IndexedRDD(usersByProduct.combineByKey[Int]((v: Int) => 1, (c: Int, v:Int) => c + 1, (c1: Int, c2: Int) => c1 + c2)).cache()
+      computeSimilarityFromRatings(usersByProduct)
     }
 
 
-    def computeSimilarity(nMaxSims:Int = 50) = {
+    def computeSimilarityFromRatings(usersByProduct:RDD[(Int,Int)],nMaxSims:Int = 20) = {
+      val sortedProductsArr = usersByProduct.map{case (usr,pdt) => (pdt,1)}.distinct().sortByKey().keys.collect()
+      val sortedProductsMap = sortedProductsArr.zipWithIndex.toMap[Int,Int]
+      val productsSize      = sortedProductsArr.size
+      val rowMatrix         = new RowMatrix(usersByProduct.groupByKey().map { case (user, productsArray) =>
+          Vectors.sparse(productsSize,productsArray.map(sortedProductsMap).zip(Seq.fill(productsArray.size)(1.0)).toSeq)
+      })
+      val simMatrix = rowMatrix.columnSimilarities()
+      val topSimsFromRatings:Array[(Int,Int)] = simMatrix.entries.top(nMaxSims)(Ordering.by(_.value)).map {
+        case MatrixEntry(productIndex1,productIndex2,simLevel) => (sortedProductsArr(productIndex1.toInt),sortedProductsArr(productIndex2.toInt))
+      }
+      writeSimilarities(topSimsFromRatings,ratingsSimilarityFile)
+    }
+
+    def computeSimilarityFromFeatures(nMaxSims:Int = 20) = {
       //Similarities
-      val pfi = model.productFeatures.zipWithIndex
-      val entries = pfi.flatMap { t => for (i <- t._1._2.indices) yield MatrixEntry(i, t._2, t._1._2(i)) }
-      val dic = pfi.map { t => (t._2, t._1._1) }.collectAsMap()
-      val topSims = new CoordinateMatrix(entries).toRowMatrix().columnSimilarities(0.01).entries.map {
-        case MatrixEntry(i, j, u) => ((i, j), u)
-      }.sortBy((_._2), false).take(nMaxSims)
-      val writer = new PrintWriter(new File(similarityFile))
-      for( ((productIndex1,productIndex2),simLevel) <- topSims){
-        writer.write(dic(productIndex1).toString)
+      val pFtIdx    = model.productFeatures.zipWithIndex
+      val entries   = pFtIdx.flatMap { t => for (i <- t._1._2.indices) yield MatrixEntry(i, t._2, t._1._2(i)) }
+      val dic       = pFtIdx.map { t => (t._2, t._1._1) }.collectAsMap()
+      val simMatrix = new CoordinateMatrix(entries).toRowMatrix().columnSimilarities()
+      val topSims = simMatrix.entries.top(nMaxSims)(Ordering.by(_.value)).map {
+        case MatrixEntry(productIndex1,productIndex2,simLevel) => (dic(productIndex1),dic(productIndex2))
+      }
+      writeSimilarities(topSims,similarityFile)
+    }
+    def computeSimilarity(nMaxSims:Int = 20) = {computeSimilarityFromFeatures(nMaxSims)}
+
+    def writeSimilarities(sims:Array[(Int,Int)], file:File): Unit ={
+      val writer  = new PrintWriter(file)
+      for( (product1,product2) <- sims){
+        writer.write(product1.toString)
         writer.write(",")
-        writer.write(dic(productIndex2).toString)
+        writer.write(product2.toString)
         writer.write("\n")
       }
       writer.close
     }
 
     def computeRecos(numberOfRecommendation: Int = 3) = {
-      val writer = new PrintWriter(new File(recoByUserFile))
+      val writer = new PrintWriter(recoByUserFile)
       for ((userId, productCount) <- usersByProductCount.toLocalIterator) {
         writer.write(userId.toString)
         writer.write(",")
