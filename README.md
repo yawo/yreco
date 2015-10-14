@@ -9,3 +9,4 @@ Dans cette présentation nous montrerons comment avec des outils simples de Mach
 
 Deux implémentations, une en mode Batch (csv, hotfolder,crons) et une en  Real Time (finagle) seront discutées.
        
+![Architecture](https://raw.githubusercontent.com/yawo/yreco/master/yreco.png)
