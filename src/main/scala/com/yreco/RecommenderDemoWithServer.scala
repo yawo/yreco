@@ -45,7 +45,7 @@ object RecommenderDemoWithServer {
     Future {
       println("Got userId %s".format(userId))
       val currentItemIdSeq = if (currentItemIds == null) Seq.empty else currentItemIds
-      val previousItemsIdCount = usersByProductCount.get(userId).getOrElse(0)
+      val previousItemsIdCount = usersByProductCount.select("pdtCount").where(s"usr = ${userId}").head().getInt(0)
       val nToRecommend = numberOfRecommendation + currentItemIdSeq.size + previousItemsIdCount
       val recommended = model.recommendProducts(userId, nToRecommend).map(_.product).drop(previousItemsIdCount)
       recommended.diff(currentItemIdSeq).take(numberOfRecommendation)
