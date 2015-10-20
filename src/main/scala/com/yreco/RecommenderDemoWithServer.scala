@@ -12,6 +12,25 @@ import RecommenderDemo._
  */
 object RecommenderDemoWithServer {
 
+  def recommendationProxy(userId: Int, numberOfRecommendation: Int, currentItemIds: Seq[Int]): Seq[Int] = {
+    println("Got userId %s".format(userId))
+    val currentItemIdSeq = if (currentItemIds == null) Seq.empty else currentItemIds
+    val previousItemsIdCount:Int = sqlProxy.sql(s"SELECT pdtCount FROM userbyproductcount WHERE usr = ${userId}").collect match {
+      case  Array() => 0
+      case  x       => x(0).getInt(0)
+    }
+    val nToRecommend = numberOfRecommendation + currentItemIdSeq.size + previousItemsIdCount
+    val recommended = model.recommendProducts(userId, nToRecommend).map(_.product).drop(previousItemsIdCount)
+    recommended.diff(currentItemIdSeq).take(numberOfRecommendation)
+  }
+
+  def getSimilarProductsProxy(productId: Int): Seq[Int] = {
+    sqlProxy.sql(s"SELECT sims FROM cooccurences WHERE product = ${productId}").collect match {
+      case  Array() => Seq()
+      case  x       => x(0).getAs[Array[Int]](0)
+    }
+  }
+
   def main(args: Array[String]) {
 
     println(
@@ -25,7 +44,7 @@ object RecommenderDemoWithServer {
 
     @transient val server: ListeningServer = ThriftMux.serveIface(":12000", new FutureIface {
       override def getRecommendations(userId: Int, numberOfRecommendation: Int, currentItemIds: Seq[Int]): Future[Seq[Int]] = {
-        recommendationProxy(userId, numberOfRecommendation, currentItemIds)
+        Future{ recommendationProxy(userId, numberOfRecommendation, currentItemIds) }
       }
 
       override def reLoadDataAndBuildModel(): Future[Boolean] = {
@@ -37,21 +56,12 @@ object RecommenderDemoWithServer {
           true
         }
       }
-    })
-    Await.ready(server)//, Duration.fromSeconds(600)
-  }
 
-  def recommendationProxy(userId: Int, numberOfRecommendation: Int, currentItemIds: Seq[Int]): Future[Seq[Int]] = {
-    Future {
-      println("Got userId %s".format(userId))
-      val currentItemIdSeq = if (currentItemIds == null) Seq.empty else currentItemIds
-      val previousItemsIdCount:Int = sqlProxy.sql(s"SELECT pdtCount FROM userbyproductcount WHERE usr = ${userId}").collect match {
-        case  Array() => 0
-        case  x       => x(0).getInt(0)
+      override def getSimilarProducts(productId: Int): Future[Seq[Int]] = {
+        Future { getSimilarProductsProxy(productId) }
       }
-      val nToRecommend = numberOfRecommendation + currentItemIdSeq.size + previousItemsIdCount
-      val recommended = model.recommendProducts(userId, nToRecommend).map(_.product).drop(previousItemsIdCount)
-      recommended.diff(currentItemIdSeq).take(numberOfRecommendation)
-    }
+    })
+
+    Await.ready(server)//, Duration.fromSeconds(600)
   }
 }
