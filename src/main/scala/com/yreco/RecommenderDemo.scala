@@ -123,6 +123,8 @@ object RecommenderDemo{
         usersByProduct      = ratings.map {case Rating(user, product, rate) => (user, product) }.cache()
         productByUser       = usersByProduct.map{case (usr,pdt) => (pdt,usr)}
         usersByProductCount = countByKey(usersByProduct).toDF("usr","pdtCount").cache()
+        usersByProductCount.registerTempTable("userbyproductcount")
+
         //usersByProductCount = IndexedRDD(countByKey(usersByProduct)).cache()
         computeSimilarityFromRatings()
         computeSimilarityFromCoocurrence()
@@ -130,7 +132,7 @@ object RecommenderDemo{
 
 
 
-    def computeSimilarityFromCoocurrence(nMaxSims:Int = 20,nMaxSimsByProd:Int = 3,cooccurenceThreshold:Int = 4): Unit ={
+    def computeSimilarityFromCoocurrence(nMaxSimsByProd:Int = 3,cooccurenceThreshold:Int = 4): Unit ={
       val coocc = countByKey(usersByProduct.join(usersByProduct).collect[((Int,Int),Int)] { case (user, (prod1, prod2)) if prod1 < prod2 => ((prod1, prod2),1)}
         ).reduceByKey{ (a: Int, b: Int) => a + b }.filter(_._2 > cooccurenceThreshold)
 
@@ -154,11 +156,11 @@ object RecommenderDemo{
       writeSimilarities(topSims,similarityFile)
     }
 
-    def computeSimilarity(nMaxSims:Int = 20) = {computeSimilarityFromRatings(nMaxSims)}
+    def computeSimilarity(nMaxSims:Int = 20) = {computeSimilarityFromCoocurrence()}
 
 
     def computeRecos(numberOfRecommendation: Int = 3) = {
-      @transient val writer = new PrintWriter(recoByUserFile)
+      val writer = new PrintWriter(recoByUserFile)
       usersByProductCount.collect.foreach{case Row(userId:Int, productCount:Int) =>
         writer.write(userId.toString)
         writer.write(",")
