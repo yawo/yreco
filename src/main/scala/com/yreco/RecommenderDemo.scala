@@ -12,11 +12,10 @@ import org.apache.spark.mllib.fpm.FPGrowth.FreqItemset
 import org.apache.spark.mllib.fpm.{FPGrowth, FPGrowthModel}
 import org.apache.spark.mllib.recommendation.{ALS, MatrixFactorizationModel, Rating}
 import org.apache.spark.rdd.{PairRDDFunctions, RDD}
-import org.apache.spark.sql.{DataFrame, Row, SQLContext}
+import org.apache.spark.sql.{DataFrame, SQLContext}
 import org.apache.spark.{SparkConf, SparkContext}
 
 import scala.collection.Map
-
 import scala.util.Try
 /**
  * Created by yawo on 20/09/15.
@@ -67,7 +66,7 @@ object RecommenderDemo{
         }.orNull
       }.filter(_ != null).distinct()
       //Note we dont need to keep the 'inverse' maps in memory
-      val productDicInverse  = rawRatings.keys.distinct().zipWithIndex().map{case (a,b) =>(a,b.toInt)}.collectAsMap()
+      val productDicInverse  = rawRatings.values.distinct().zipWithIndex().map{case (a,b) =>(a,b.toInt)}.collectAsMap()
       ratings = rawRatings.map{case (a,b) => new Rating(a.toInt,productDicInverse(b),1D)}
       productDic  = productDicInverse.map(_.swap)
     }
@@ -114,20 +113,20 @@ object RecommenderDemo{
       val coocc = countByKey(usersByProduct.join(usersByProduct).collect[((Int,Int),Int)] { case (user, (prod1, prod2)) if prod1 < prod2 => ((prod1, prod2),1)}
         ).reduceByKey{ (a: Int, b: Int) => a + b }.filter(_._2 > cooccurenceThreshold)
 
-      cooccurences = coocc.flatMap{ case (prod, count) =>
+      val cooccurencesRDD = coocc.flatMap{ case (prod, count) =>
         Seq((prod._1, (prod._2, count)), (prod._2, (prod._1, count)))
-      }.groupByKey.map { case (prod, prodCounts) => (prod, prodCounts.toArray.sortBy(_._2)(Ordering.Int.reverse).take(nMaxSimsByProd).map(_._1))
-      }.toDF("product","sims").cache()
+      }.groupByKey.map { case (prod, prodCounts) => (prod, prodCounts.toArray.sortBy(_._2)(Ordering.Int.reverse).take(nMaxSimsByProd).map(_._1))}
+
+      val writer  = new PrintWriter(similarityFile)
+      cooccurencesRDD.toLocalIterator.foreach{case (product:Int, sims:Array[Int]) =>
+        writer.write(productDic(product))
+        writer.write(sims.map(productDic).mkString(",",",","\n"))
+      }
+      writer.close
+
+      cooccurences = cooccurencesRDD.toDF("product","sims").cache()
       cooccurences.registerTempTable("cooccurences")
 
-      cooccurences.foreachPartition((iterator) => {
-        val writer  = new PrintWriter(similarityFile)
-        iterator.foreach{case Row(product:Int, sims:Seq[Int]) =>
-          writer.write(productDic(product))
-          writer.write(sims.map(productDic).mkString(",",",","\n"))
-        }
-        writer.close
-      })
 
     }
 
@@ -141,7 +140,7 @@ object RecommenderDemo{
 
       // Frequent pattern
       val fpWriter = new PrintWriter("/tmp/frequentpatterns.csv")
-      fpModel.freqItemsets.toLocalIterator.foreach{ itemset: FreqItemset[Int] =>
+      fpModel.freqItemsets.sortBy(_.items.size).toLocalIterator.foreach{ itemset: FreqItemset[Int] =>
         fpWriter.write(itemset.items.map(productDic).mkString("[", ",", "] :: "))
         fpWriter.write(itemset.freq.toString)
         fpWriter.write("\n")
@@ -154,6 +153,7 @@ object RecommenderDemo{
         arWriter.write(rule.antecedent.map(productDic).mkString("[", ",", "] => "))
         arWriter.write(rule.consequent.map(productDic).mkString("[", ",", "] :: "))
         arWriter.write(rule.confidence.toString)
+        arWriter.write("\n")
       }
       arWriter.close()
     }
@@ -163,7 +163,7 @@ object RecommenderDemo{
     */
     def computeRecos(usersByProductCountRDD:RDD[(Int,Int)],numberOfRecommendation: Int = 3) = {
         val writer = new PrintWriter(recoByUserFile)
-        usersByProductCountRDD.toLocalIterator.foreach{case Row(userId:Int, productCount:Int) =>
+        usersByProductCountRDD.toLocalIterator.foreach{case (userId:Int, productCount:Int) =>
           writer.write(userId.toString)
           writer.write(model.recommendProducts(userId, productCount + numberOfRecommendation).map {
             (x) => productDic(x.product)
