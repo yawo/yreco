@@ -71,16 +71,6 @@ object RecommenderDemo{
       productDic  = productDicInverse.map(_.swap)
     }
 
-    def loadIncrementalRatings(filePath: String) = {
-      val viewRDD = scProxy.textFile(filePath).map { case str: String => Try {
-          val arr = str.split(',');
-          new Rating(arr(1).toInt, arr(2).toInt, 1D)
-        }.getOrElse(null)
-      }.filter(_ != null).distinct()
-
-      ratings = viewRDD ++ ratings
-    }
-
     def countByKey[K,V](rdd:RDD[(K,V)])(implicit f:(RDD[(K,V)] => PairRDDFunctions[K,V])): RDD[(K,Int)] ={
       rdd.aggregateByKey[Int](1)((c: Int, v:V) => c+1, (c1: Int, c2: Int) => c1+c2)
     } //or .countApproxDistinctByKey(countApproxAccuracy) but may consume more resources...
