@@ -7,17 +7,15 @@ import org.apache.hadoop.hbase.client.Result
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import org.apache.hadoop.hbase.mapreduce.TableInputFormat
 import org.apache.hadoop.hbase.util.Bytes
-import org.apache.spark.mllib.fpm.{FPGrowthModel, FPGrowth}
-import org.apache.spark.mllib.linalg.Vectors
-import org.apache.spark.mllib.linalg.distributed.{CoordinateMatrix, MatrixEntry, RowMatrix}
+import org.apache.spark.mllib.fpm.AssociationRules.Rule
+import org.apache.spark.mllib.fpm.FPGrowth.FreqItemset
+import org.apache.spark.mllib.fpm.{FPGrowth, FPGrowthModel}
 import org.apache.spark.mllib.recommendation.{ALS, MatrixFactorizationModel, Rating}
 import org.apache.spark.rdd.{PairRDDFunctions, RDD}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.mllib.fpm.FPGrowth.FreqItemset
 
-import scala.collection.mutable
-import scala.collection.mutable.{LinkedHashSet, Map => MutableMap}
+import scala.collection.mutable.{Map => MutableMap}
 import scala.util.Try
 /**
  * Created by yawo on 20/09/15.
@@ -106,32 +104,45 @@ object RecommenderDemo{
       }.groupByKey.map { case (prod, prodCounts) => (prod, prodCounts.toArray.sortBy(_._2)(Ordering.Int.reverse).take(nMaxSimsByProd).map(_._1))
       }.toDF("product","sims").cache()
       cooccurences.registerTempTable("cooccurences")
-      val writer  = new PrintWriter(similarityFile)
+
       cooccurences.foreachPartition((iterator) => {
-        iterator.foreach{case Row(product:Int, sims:Array[Int]) =>
+        val writer  = new PrintWriter(similarityFile)
+        iterator.foreach{case Row(product:Int, sims:Seq[Int]) =>
           writer.write(product.toString)
-          writer.write(",")
-          writer.write(sims.mkString(","))
-          writer.write("\n")
+          writer.write(sims.mkString(",",",","\n"))
         }
+        writer.close
       })
-      writer.close
+
     }
 
-    def patternMining(minSupport:Double=0.3,numPartitions:Int=10,minConfidence:Int = 0.8): Unit ={
-      val usersTransactions:RDD[Iterable[Int]]  = usersByProduct.groupByKey().values
+    def minePatterns(minSupport:Double=0.3,numPartitions:Int=10,minConfidence:Double = 0.8): Unit ={
+      val usersTransactions:RDD[Array[Int]]  = usersByProduct.groupByKey().map{case (u:Int,tx:Iterable[Int]) => tx.toArray}
       val fpg                                   = new FPGrowth().setMinSupport(minSupport).setNumPartitions(numPartitions)
       val fpModel:FPGrowthModel[Int]            = fpg.run(usersTransactions)
-      val fpWriter = new PrintWriter("/tmp/frequentpatterns.csv")
+      // Frequent pattern
+
       fpModel.freqItemsets.foreachPartition((iterator) => {
+        val fpWriter = new PrintWriter("/tmp/frequentpatterns.csv")
         iterator.foreach{ itemset: FreqItemset[Int] =>
-          fpWriter.write(itemset.items.mkString("[", ",", "]"))
-          fpWriter.write(",")
+          fpWriter.write(itemset.items.mkString("[", ",", "] :: "))
           fpWriter.write(itemset.freq.toString)
           fpWriter.write("\n")
         }
+        fpWriter.close()
       })
-      //TODO Association Rule
+
+      // Association Rule
+
+      fpModel.generateAssociationRules(minConfidence).foreachPartition((iterator) => {
+        val arWriter = new PrintWriter("/tmp/associationrules.csv")
+        iterator.foreach{ rule: Rule[Int] =>
+          arWriter.write(rule.antecedent.mkString("[", ",", "] => "))
+          arWriter.write(rule.consequent .mkString("[", ",", "] :: "))
+          arWriter.write(rule.confidence.toString)
+        }
+        arWriter.close()
+      })
 
     }
 
@@ -142,9 +153,8 @@ object RecommenderDemo{
       usersByProductCount.foreachPartition((iterator) => {
         iterator.foreach{case Row(userId:Int, productCount:Int) =>
           writer.write(userId.toString)
-          writer.write(",")
-          writer.write(model.recommendProducts(userId, productCount + numberOfRecommendation).map(_.product).drop(productCount).take(numberOfRecommendation).mkString(","))
-          writer.write("\n")
+          writer.write(model.recommendProducts(userId, productCount + numberOfRecommendation).map(
+            _.product).drop(productCount).take(numberOfRecommendation).mkString(",",",","\n"))
         }
       })
       writer.close

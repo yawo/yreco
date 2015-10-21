@@ -21,5 +21,6 @@ object RecommenderDemoBatch {
     trainModel
     computeSimilarity()
     computeRecos()
+    minePatterns()
   }
 }

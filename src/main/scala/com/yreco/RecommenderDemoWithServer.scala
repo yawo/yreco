@@ -53,6 +53,7 @@ object RecommenderDemoWithServer {
           trainModel
           computeSimilarity()
           computeRecos()
+          minePatterns()
           true
         }
       }
