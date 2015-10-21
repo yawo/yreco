@@ -43,8 +43,9 @@ object RecommenderDemoWithServer {
       """.stripMargin)
 
     @transient val server: ListeningServer = ThriftMux.serveIface(":12000", new FutureIface {
-      override def getRecommendations(userId: Int, numberOfRecommendation: Int, currentItemIds: Seq[Int]): Future[Seq[Int]] = {
-        Future{ recommendationProxy(userId, numberOfRecommendation, currentItemIds) }
+      val productDicInverse = productDic.map(_.swap)
+      override def getRecommendations(userId: Int, numberOfRecommendation: Int, currentItemIds: Seq[String]): Future[Seq[String]] = {
+        Future{ recommendationProxy(userId, numberOfRecommendation, currentItemIds.map(productDicInverse)).map(productDic) }
       }
 
       override def reLoadDataAndBuildModel(): Future[Boolean] = {
@@ -55,8 +56,8 @@ object RecommenderDemoWithServer {
         }
       }
 
-      override def getSimilarProducts(productId: Int): Future[Seq[Int]] = {
-        Future { getSimilarProductsProxy(productId) }
+      override def getSimilarProducts(productId: String): Future[Seq[String]] = {
+        Future { getSimilarProductsProxy(productDicInverse(productId)).map(productDic) }
       }
     })
 

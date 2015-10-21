@@ -15,7 +15,8 @@ import org.apache.spark.rdd.{PairRDDFunctions, RDD}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.{SparkConf, SparkContext}
 
-import scala.collection.mutable.{Map => MutableMap}
+import scala.collection.Map
+
 import scala.util.Try
 /**
  * Created by yawo on 20/09/15.
@@ -54,14 +55,21 @@ object RecommenderDemo{
     /**
      * FETCH, TRANSFORM AND BUILD RATING DATA FROM HBASE STORE. INCREMENTAL LOADING FROM FILE ALSO SUPPORTED.
     */
-    var ratings: RDD[Rating] = null;
+    var ratings: RDD[Rating]        = null
+    var productDic:Map[Int,String]  = null
+
     def loadRatings = {
       val viewRDD: RDD[(ImmutableBytesWritable, Result)] = scProxy.newAPIHadoopRDD(hbaseConf, classOf[TableInputFormat], classOf[ImmutableBytesWritable], classOf[Result])
-      ratings = viewRDD.map {
-        case (key, res) => Try(Bytes.toString(res.getValue(ProductColumnFamily, ProductIdColumnQualifier)).toInt).toOption.map {
-          new Rating(Bytes.toString(res.getValue(UserColumnFamily, UserIdColumnQualifier)).toInt, _, 1D)
+
+      val rawRatings:RDD[(String,String)] = viewRDD.map {
+        case (key, res) => Try(Bytes.toString(res.getValue(ProductColumnFamily, ProductIdColumnQualifier))).toOption.map {
+          (Bytes.toString(res.getValue(UserColumnFamily, UserIdColumnQualifier)), _)
         }.orNull
       }.filter(_ != null).distinct()
+      //Note we dont need to keep the 'inverse' maps in memory
+      val productDicInverse  = rawRatings.keys.distinct().zipWithIndex().map{case (a,b) =>(a,b.toInt)}.collectAsMap()
+      ratings = rawRatings.map{case (a,b) => new Rating(a.toInt,productDicInverse(b),1D)}
+      productDic  = productDicInverse.map(_.swap)
     }
 
     def loadIncrementalRatings(filePath: String) = {
@@ -115,8 +123,8 @@ object RecommenderDemo{
       cooccurences.foreachPartition((iterator) => {
         val writer  = new PrintWriter(similarityFile)
         iterator.foreach{case Row(product:Int, sims:Seq[Int]) =>
-          writer.write(product.toString)
-          writer.write(sims.mkString(",",",","\n"))
+          writer.write(productDic(product))
+          writer.write(sims.map(productDic).mkString(",",",","\n"))
         }
         writer.close
       })
@@ -134,7 +142,7 @@ object RecommenderDemo{
       // Frequent pattern
       val fpWriter = new PrintWriter("/tmp/frequentpatterns.csv")
       fpModel.freqItemsets.toLocalIterator.foreach{ itemset: FreqItemset[Int] =>
-        fpWriter.write(itemset.items.mkString("[", ",", "] :: "))
+        fpWriter.write(itemset.items.map(productDic).mkString("[", ",", "] :: "))
         fpWriter.write(itemset.freq.toString)
         fpWriter.write("\n")
       }
@@ -143,8 +151,8 @@ object RecommenderDemo{
       // Association Rule
       val arWriter = new PrintWriter("/tmp/associationrules.csv")
       fpModel.generateAssociationRules(minConfidence).toLocalIterator.foreach{ rule: Rule[Int] =>
-        arWriter.write(rule.antecedent.mkString("[", ",", "] => "))
-        arWriter.write(rule.consequent .mkString("[", ",", "] :: "))
+        arWriter.write(rule.antecedent.map(productDic).mkString("[", ",", "] => "))
+        arWriter.write(rule.consequent.map(productDic).mkString("[", ",", "] :: "))
         arWriter.write(rule.confidence.toString)
       }
       arWriter.close()
@@ -157,8 +165,9 @@ object RecommenderDemo{
         val writer = new PrintWriter(recoByUserFile)
         usersByProductCountRDD.toLocalIterator.foreach{case Row(userId:Int, productCount:Int) =>
           writer.write(userId.toString)
-          writer.write(model.recommendProducts(userId, productCount + numberOfRecommendation).map(
-            _.product).drop(productCount).take(numberOfRecommendation).mkString(",",",","\n"))
+          writer.write(model.recommendProducts(userId, productCount + numberOfRecommendation).map {
+            (x) => productDic(x.product)
+          }.slice(productCount, productCount + numberOfRecommendation).mkString(",",",","\n"))
         }
         writer.close
         usersByProductCountRDD //return for chaining

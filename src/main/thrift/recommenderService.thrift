@@ -1,6 +1,6 @@
 service RecommenderEngine{
-    list<i32> getRecommendations(1:i32 userId, 2:i32 numberOfRecommendation, 3:list<i32> currentItemIds)
-    list<i32> getSimilarProducts(1:i32 productId)
+    list<string> getRecommendations(1:i32 userId, 2:i32 numberOfRecommendation, 3:list<string> currentItemIds)
+    list<string> getSimilarProducts(1:string productId)
     bool reLoadDataAndBuildModel()
 
 }
