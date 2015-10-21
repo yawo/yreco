@@ -19,8 +19,5 @@ object RecommenderDemoBatch {
       """.stripMargin);
     loadRatings
     trainModel
-    computeSimilarity()
-    computeRecos()
-    minePatterns()
   }
 }

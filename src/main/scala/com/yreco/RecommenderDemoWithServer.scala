@@ -51,9 +51,6 @@ object RecommenderDemoWithServer {
         Future {
           loadRatings
           trainModel
-          computeSimilarity()
-          computeRecos()
-          minePatterns()
           true
         }
       }

@@ -50,8 +50,10 @@ object RecommenderDemo{
     hbaseConf.set(TableInputFormat.INPUT_TABLE, viewTable)
 
     import sqlProxy.implicits._
-    //FETCH DATA FROM HBASE
 
+    /**
+     * FETCH, TRANSFORM AND BUILD RATING DATA FROM HBASE STORE. INCREMENTAL LOADING FROM FILE ALSO SUPPORTED.
+    */
     var ratings: RDD[Rating] = null;
     def loadRatings = {
       val viewRDD: RDD[(ImmutableBytesWritable, Result)] = scProxy.newAPIHadoopRDD(hbaseConf, classOf[TableInputFormat], classOf[ImmutableBytesWritable], classOf[Result])
@@ -72,30 +74,35 @@ object RecommenderDemo{
       ratings = viewRDD ++ ratings
     }
 
-    //BUILD THE RECO MODEL USING ALS ALGORITHM
-    var model: MatrixFactorizationModel             = null
-    //var usersByProductCount: IndexedRDD[Int, Int]  = null
-    var usersByProductCount: DataFrame  = null
-    var usersByProduct:RDD[(Int,Int)]               = null
-    // var productByUserCount:RDD[(Int,Int)]         = null
-    var productByUser:RDD[(Int,Int)]                = null
-    // var sortedProductsArr:Array[Int]              = null
-    var cooccurences:DataFrame                      = null
-
     def countByKey[K,V](rdd:RDD[(K,V)])(implicit f:(RDD[(K,V)] => PairRDDFunctions[K,V])): RDD[(K,Int)] ={
       rdd.aggregateByKey[Int](1)((c: Int, v:V) => c+1, (c1: Int, c2: Int) => c1+c2)
     } //or .countApproxDistinctByKey(countApproxAccuracy) but may consume more resources...
 
+    /**
+     * BUILD THE RECO MODEL USING ALS ALGORITHM. SEE https://spark.apache.org/docs/latest/mllib-collaborative-filtering.html#collaborative-filtering
+     */
+
+    var model: MatrixFactorizationModel             = null
+    var usersByProductCount: DataFrame  = null
+    var usersByProduct:RDD[(Int,Int)]               = null
+    var cooccurences:DataFrame                      = null
+
     def trainModel = {
-        model               = ALS.trainImplicit(ratings, rank, numIterations)
-        usersByProduct      = ratings.map {case Rating(user, product, rate) => (user, product) }.cache()
-        productByUser       = usersByProduct.map{case (usr,pdt) => (pdt,usr)}
-        usersByProductCount = countByKey(usersByProduct).toDF("usr","pdtCount").cache()
+        model                       = ALS.trainImplicit(ratings, rank, numIterations)
+        usersByProduct              = ratings.map {case Rating(user, product, rate) => (user, product) }.cache()
+        val usersByProductCountRDD  = countByKey(usersByProduct);
+        usersByProductCount         = usersByProductCountRDD.toDF("usr","pdtCount").cache()
+
         usersByProductCount.registerTempTable("userbyproductcount")
-        computeSimilarityFromCoocurrence()
+        computeRecos(usersByProductCountRDD)
+        computeSimilarity()
+        minePatterns()
     }
 
-    def computeSimilarityFromCoocurrence(nMaxSimsByProd:Int = 3,cooccurenceThreshold:Int = 4): Unit ={
+    /**
+    * COOCURRENCE SIMILARITIES. NAIVE IMPLEMENTAION.
+    */
+    def computeSimilarity(nMaxSimsByProd:Int = 3,cooccurenceThreshold:Int = 4): Unit ={
       val coocc = countByKey(usersByProduct.join(usersByProduct).collect[((Int,Int),Int)] { case (user, (prod1, prod2)) if prod1 < prod2 => ((prod1, prod2),1)}
         ).reduceByKey{ (a: Int, b: Int) => a + b }.filter(_._2 > cooccurenceThreshold)
 
@@ -116,63 +123,44 @@ object RecommenderDemo{
 
     }
 
+    /**
+    * PATTERN MINING. see https://spark.apache.org/docs/latest/mllib-frequent-pattern-mining.html
+   */
     def minePatterns(minSupport:Double=0.3,numPartitions:Int=10,minConfidence:Double = 0.8): Unit ={
       val usersTransactions:RDD[Array[Int]]  = usersByProduct.groupByKey().map{case (u:Int,tx:Iterable[Int]) => tx.toArray}
       val fpg                                   = new FPGrowth().setMinSupport(minSupport).setNumPartitions(numPartitions)
       val fpModel:FPGrowthModel[Int]            = fpg.run(usersTransactions)
-      // Frequent pattern
 
-      fpModel.freqItemsets.foreachPartition((iterator) => {
-        val fpWriter = new PrintWriter("/tmp/frequentpatterns.csv")
-        iterator.foreach{ itemset: FreqItemset[Int] =>
-          fpWriter.write(itemset.items.mkString("[", ",", "] :: "))
-          fpWriter.write(itemset.freq.toString)
-          fpWriter.write("\n")
-        }
-        fpWriter.close()
-      })
+      // Frequent pattern
+      val fpWriter = new PrintWriter("/tmp/frequentpatterns.csv")
+      fpModel.freqItemsets.toLocalIterator.foreach{ itemset: FreqItemset[Int] =>
+        fpWriter.write(itemset.items.mkString("[", ",", "] :: "))
+        fpWriter.write(itemset.freq.toString)
+        fpWriter.write("\n")
+      }
+      fpWriter.close()
 
       // Association Rule
-
-      fpModel.generateAssociationRules(minConfidence).foreachPartition((iterator) => {
-        val arWriter = new PrintWriter("/tmp/associationrules.csv")
-        iterator.foreach{ rule: Rule[Int] =>
-          arWriter.write(rule.antecedent.mkString("[", ",", "] => "))
-          arWriter.write(rule.consequent .mkString("[", ",", "] :: "))
-          arWriter.write(rule.confidence.toString)
-        }
-        arWriter.close()
-      })
-
+      val arWriter = new PrintWriter("/tmp/associationrules.csv")
+      fpModel.generateAssociationRules(minConfidence).toLocalIterator.foreach{ rule: Rule[Int] =>
+        arWriter.write(rule.antecedent.mkString("[", ",", "] => "))
+        arWriter.write(rule.consequent .mkString("[", ",", "] :: "))
+        arWriter.write(rule.confidence.toString)
+      }
+      arWriter.close()
     }
 
-    def computeSimilarity(nMaxSims:Int = 20) = {computeSimilarityFromCoocurrence()}
-
-    def computeRecos(numberOfRecommendation: Int = 3) = {
-      val writer = new PrintWriter(recoByUserFile)
-      usersByProductCount.foreachPartition((iterator) => {
-        iterator.foreach{case Row(userId:Int, productCount:Int) =>
+    /**
+    * COMPUTE THE RECOS AND STORE THEM IN CSV.
+    */
+    def computeRecos(usersByProductCountRDD:RDD[(Int,Int)],numberOfRecommendation: Int = 3) = {
+        val writer = new PrintWriter(recoByUserFile)
+        usersByProductCountRDD.toLocalIterator.foreach{case Row(userId:Int, productCount:Int) =>
           writer.write(userId.toString)
           writer.write(model.recommendProducts(userId, productCount + numberOfRecommendation).map(
             _.product).drop(productCount).take(numberOfRecommendation).mkString(",",",","\n"))
         }
-      })
-      writer.close
-    }
-
-    def writeSimilarities[B](sims:Seq[(Int,B)], file:File, defaultWriter:Option[PrintWriter]=None): Unit ={
-      val writer  = defaultWriter.getOrElse(new PrintWriter(file))
-      for( (product1,product2) <- sims){
-        writer.write(product1.toString)
-        writer.write(",")
-        product2 match {
-          case p:Int      => writer.write(product2.toString)
-          case Seq(s@_*)  => writer.write(s.mkString(","))
-          case Array(s@_*)  => writer.write(s.mkString(","))
-          case _          => println(s"matching problem for ${product2}")
-        }
-        writer.write("\n")
-      }
-      writer.close
+        writer.close
+        usersByProductCountRDD //return for chaining
     }
 }
