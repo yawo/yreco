@@ -1,6 +1,6 @@
 #YRecommender
 
-Dans la version _5.5_, **Hybris** rajoute la fonctionnalité des **Business Events** (similaire à google analytics) qui facilitent le tracking des actions des utilisateurs d'un site. 
+Depuis la version _5.5_, **Hybris** rajoute la fonctionnalité des **Business Events** (similaire à google analytics) qui facilitent le tracking des actions des utilisateurs d'un site. 
 
 Cette innovation permet d'exploiter une immense source de données à des fins d'analyse, de **marketing** et d'augmentation des **achats** sur les sites ecommerce.
 
