@@ -22,4 +22,4 @@ do
 done
 
 #Run Spark Job
-$SPARK_HOME/bin/spark-submit --class "com.yreco.RecommenderDemoBatch" --master local[8] /home/yawo/Studio/ytech/others/finagle/target/scala-2.11/yreco-assembly-1.0.jar
+$SPARK_HOME/bin/spark-submit --class "com.yreco.RecommenderDemoWithServer" --master local[8] /home/yawo/Studio/ytech/others/finagle/target/scala-2.11/yreco-assembly-1.0.jar

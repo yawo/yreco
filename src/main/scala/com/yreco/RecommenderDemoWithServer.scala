@@ -4,6 +4,7 @@ import com.twitter.finagle.{ListeningServer, ThriftMux}
 import com.twitter.util.{Await, Future}
 import thrift.RecommenderEngine.FutureIface
 import RecommenderDemo._
+import scala.collection.Map
 /**
  * Created by yawo on 20/09/15.
  *
@@ -27,7 +28,7 @@ object RecommenderDemoWithServer {
   def getSimilarProductsProxy(productId: Int): Seq[Int] = {
     sqlProxy.sql(s"SELECT sims FROM cooccurences WHERE product = ${productId}").collect match {
       case  Array() => Seq()
-      case  x       => x(0).getAs[Array[Int]](0)
+      case  x       => x(0).getSeq[Int](0)
     }
   }
 
@@ -43,7 +44,7 @@ object RecommenderDemoWithServer {
       """.stripMargin)
 
     @transient val server: ListeningServer = ThriftMux.serveIface(":12000", new FutureIface {
-      val productDicInverse = productDic.map(_.swap)
+      var productDicInverse:Map[String,Int]  = null
       override def getRecommendations(userId: Int, numberOfRecommendation: Int, currentItemIds: Seq[String]): Future[Seq[String]] = {
         Future{ recommendationProxy(userId, numberOfRecommendation, currentItemIds.map(productDicInverse)).map(productDic) }
       }
@@ -52,6 +53,7 @@ object RecommenderDemoWithServer {
         Future {
           loadRatings
           trainModel
+          productDicInverse = productDic.map(_.swap)
           true
         }
       }

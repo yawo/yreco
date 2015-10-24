@@ -1,6 +1,7 @@
 package com.yreco
 
 import java.io.{File, PrintWriter}
+import java.util.Date
 
 import org.apache.hadoop.hbase.HBaseConfiguration
 import org.apache.hadoop.hbase.client.Result
@@ -30,6 +31,7 @@ object RecommenderDemo{
     @transient val conf          = new SparkConf().setAppName("Erecommender")
     @transient lazy val scProxy  = SparkContext.getOrCreate(conf) //new SparkContext(conf);
     @transient lazy val sqlProxy = SQLContext.getOrCreate(scProxy)
+    @transient val format        = new java.text.SimpleDateFormat("yyyyMMddHHmmss")
 
     val viewTable                = "view"
     val ProductColumnFamily      = Bytes.toBytes("p")
@@ -38,7 +40,6 @@ object RecommenderDemo{
     val UserIdColumnQualifier    = Bytes.toBytes("id")
     val rank                     = 30
     val numIterations            = 20
-    val similarityFile           = new File("/tmp/sims.csv")
     val ratingsSimilarityFile    = new File("/tmp/sims_ratings.csv")
     val recoByUserFile           = new File("/tmp/reco.csv")
     val countApproxAccuracy      = 0.001
@@ -107,10 +108,13 @@ object RecommenderDemo{
         Seq((prod._1, (prod._2, count)), (prod._2, (prod._1, count)))
       }.groupByKey.map { case (prod, prodCounts) => (prod, prodCounts.toArray.sortBy(_._2)(Ordering.Int.reverse).take(nMaxSimsByProd).map(_._1))}
 
-      val writer  = new PrintWriter(similarityFile)
-      cooccurencesRDD.toLocalIterator.foreach{case (product:Int, sims:Array[Int]) =>
-        writer.write(productDic(product))
-        writer.write(sims.map(productDic).mkString(",",",","\n"))
+      val simFilePath = s"/home/yawo/Studio/hybris5.7/hybris/log/spark_merchandises/similars-en-${format.format(new Date())}.csv"
+      val writer  = new PrintWriter(simFilePath)
+      coocc.toLocalIterator.foreach{case ((prod1:Int, prod2:Int),nOcc:Int) =>
+        writer.write(productDic(prod1))
+        writer.write(",")
+        writer.write(productDic(prod2))
+        writer.write("\n")
       }
       writer.close
 
