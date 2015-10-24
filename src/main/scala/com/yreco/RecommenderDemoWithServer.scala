@@ -45,19 +45,38 @@ object RecommenderDemoWithServer {
 
     @transient val server: ListeningServer = ThriftMux.serveIface(":12000", new FutureIface {
       var productDicInverse:Map[String,Int]  = null
+
+      /**
+       *
+       * @param userId
+       * @param numberOfRecommendation
+       * @param currentItemIds
+       * @return
+       */
       override def getRecommendations(userId: Int, numberOfRecommendation: Int, currentItemIds: Seq[String]): Future[Seq[String]] = {
         Future{ recommendationProxy(userId, numberOfRecommendation, currentItemIds.map(productDicInverse)).map(productDic) }
       }
 
-      override def reLoadDataAndBuildModel(): Future[Boolean] = {
+      /**
+       *
+       * @param nMaxSimsByProd (default 3)
+       * @param cooccurenceThresholdSupport (default 0.07)
+       * @return
+       */
+      override def reLoadDataAndBuildModel(nMaxSimsByProd:Int = 3,cooccurenceThresholdSupport:Double = 0.07): Future[Boolean] = {
         Future {
           loadRatings
-          trainModel
+          trainModel(nMaxSimsByProd,cooccurenceThresholdSupport)
           productDicInverse = productDic.map(_.swap)
           true
         }
       }
 
+      /**
+       *
+       * @param productId
+       * @return
+       */
       override def getSimilarProducts(productId: String): Future[Seq[String]] = {
         Future { getSimilarProductsProxy(productDicInverse(productId)).map(productDic) }
       }

@@ -43,6 +43,7 @@ object RecommenderDemo{
     val ratingsSimilarityFile    = new File("/tmp/sims_ratings.csv")
     val recoByUserFile           = new File("/tmp/reco.csv")
     val countApproxAccuracy      = 0.001
+    val defaultSimThreshold      = 5
 
     hbaseConf.set("hbase.master", "localhost:60000")
     hbaseConf.setInt("timeout", 120000)
@@ -57,6 +58,7 @@ object RecommenderDemo{
     */
     var ratings: RDD[Rating]        = null
     var productDic:Map[Int,String]  = null
+    var ratingCounts:Long           = 1
 
     def loadRatings = {
       val viewRDD: RDD[(ImmutableBytesWritable, Result)] = scProxy.newAPIHadoopRDD(hbaseConf, classOf[TableInputFormat], classOf[ImmutableBytesWritable], classOf[Result])
@@ -67,9 +69,10 @@ object RecommenderDemo{
         }.orNull
       }.filter(_ != null).distinct()
       //Note we dont need to keep the 'inverse' maps in memory
-      val productDicInverse  = rawRatings.values.distinct().zipWithIndex().map{case (a,b) =>(a,b.toInt)}.collectAsMap()
-      ratings = rawRatings.map{case (a,b) => new Rating(a.toInt,productDicInverse(b),1D)}
-      productDic  = productDicInverse.map(_.swap)
+      val productDicInverse   = rawRatings.values.distinct().zipWithIndex().map{case (a,b) =>(a,b.toInt)}.collectAsMap()
+      ratings                 = rawRatings.map{case (a,b) => new Rating(a.toInt,productDicInverse(b),1D)}
+      ratingCounts            = ratings.count()
+      productDic              = productDicInverse.map(_.swap)
     }
 
     def countByKey[K,V](rdd:RDD[(K,V)])(implicit f:(RDD[(K,V)] => PairRDDFunctions[K,V])): RDD[(K,Int)] ={
@@ -85,7 +88,7 @@ object RecommenderDemo{
     var usersByProduct:RDD[(Int,Int)]               = null
     var cooccurences:DataFrame                      = null
 
-    def trainModel = {
+    def trainModel(nMaxSimsByProd:Int = 3,cooccurenceThresholdSupport:Double = 0.07) = {
         model                       = ALS.trainImplicit(ratings, rank, numIterations)
         usersByProduct              = ratings.map {case Rating(user, product, rate) => (user, product) }.cache()
         val usersByProductCountRDD  = countByKey(usersByProduct);
@@ -93,14 +96,16 @@ object RecommenderDemo{
 
         usersByProductCount.registerTempTable("userbyproductcount")
         computeRecos(usersByProductCountRDD)
-        computeSimilarity()
+        computeSimilarity(nMaxSimsByProd,cooccurenceThresholdSupport)
         minePatterns()
     }
 
     /**
     * COOCURRENCE SIMILARITIES. NAIVE IMPLEMENTAION.
     */
-    def computeSimilarity(nMaxSimsByProd:Int = 3,cooccurenceThreshold:Int = 4): Unit ={
+    def computeSimilarity(nMaxSimsByProd:Int = 3,cooccurenceThresholdSupport:Double = 0.07): Unit ={
+      val cooccurenceThreshold:Long = (cooccurenceThresholdSupport * ratingCounts).toLong
+      println(s"cooccurenceThreshold = ${cooccurenceThreshold}")
       val coocc = countByKey(usersByProduct.join(usersByProduct).collect[((Int,Int),Int)] { case (user, (prod1, prod2)) if prod1 < prod2 => ((prod1, prod2),1)}
         ).reduceByKey{ (a: Int, b: Int) => a + b }.filter(_._2 > cooccurenceThreshold)
 

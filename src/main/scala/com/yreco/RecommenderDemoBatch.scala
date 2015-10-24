@@ -18,6 +18,6 @@ object RecommenderDemoBatch {
         |
       """.stripMargin);
     loadRatings
-    trainModel
+    trainModel()
   }
 }
