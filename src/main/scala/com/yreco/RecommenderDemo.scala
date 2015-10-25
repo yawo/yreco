@@ -132,8 +132,8 @@ object RecommenderDemo{
     /**
     * PATTERN MINING. see https://spark.apache.org/docs/latest/mllib-frequent-pattern-mining.html
    */
-    def minePatterns(minSupport:Double=0.4,numPartitions:Int=10,minConfidence:Double = 0.9): Unit ={
-      val usersTransactions:RDD[Array[Int]]  = usersByProduct.groupByKey().map{case (u:Int,tx:Iterable[Int]) => tx.toArray}
+    def minePatterns(minSupport:Double=0.4, numPartitions:Int=10, minConfidence:Double = 0.7): Unit ={
+      val usersTransactions:RDD[Array[Int]]     = usersByProduct.groupByKey().map{case (u:Int,tx:Iterable[Int]) => tx.toArray}
       val fpg                                   = new FPGrowth().setMinSupport(minSupport).setNumPartitions(numPartitions)
       val fpModel:FPGrowthModel[Int]            = fpg.run(usersTransactions)
 
